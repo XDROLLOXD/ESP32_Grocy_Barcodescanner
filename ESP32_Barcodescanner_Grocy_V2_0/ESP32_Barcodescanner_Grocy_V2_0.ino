@@ -5,7 +5,7 @@
 #include <DFRobot_GM60.h>
 DFRobot_GM60_UART gm60;
 #include <ArduinoMqttClient.h>
-#include <SoftwareSerial.h>
+#include <SoftwareSerial.h> // had to delete this
 #define TX_PAYLOAD_BUFFER_SIZE 2048 //define the Payload size for MQTT messages
 
 
@@ -240,7 +240,7 @@ public:
 
     //generate json data
     DynamicJsonDocument doc(1024);
-    doc["amount"] = amount;
+    doc["amount"] = 1;
     doc["transaction_type"] = "purchase";
     String json;
     serializeJson(doc, json);
@@ -252,7 +252,7 @@ public:
       beep_succes();
       Serial.print("Product ");
       Serial.print(Product.name);
-      Serial.println(" addet to stock");
+      Serial.println(" added to stock");
       error_message = "";
     } else {
       beep_error();
@@ -280,7 +280,7 @@ public:
     http.addHeader("GROCY-API-KEY", API_key);
 
     DynamicJsonDocument doc(1024);
-    doc["amount"] = amount;
+    doc["amount"] = 1;
     doc["transaction_type"] = "consume";
 
     String json;
@@ -398,7 +398,7 @@ public:
     doc["ip"] = WiFi.localIP();
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(stateTopic);
+    mqttClient.beginMessage(stateTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
 
@@ -435,7 +435,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic);
+    mqttClient.beginMessage(discoveryTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -468,7 +468,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
     if (MQTT_enable == true) {
-      mqttClient.beginMessage(discoveryTopic);
+      mqttClient.beginMessage(discoveryTopic), true, 1;
       mqttClient.print(buffer);
       mqttClient.endMessage();
     };
@@ -495,7 +495,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic);
+    mqttClient.beginMessage(discoveryTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -521,7 +521,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic);
+    mqttClient.beginMessage(discoveryTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -547,7 +547,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic);
+    mqttClient.beginMessage(discoveryTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -573,7 +573,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic);
+    mqttClient.beginMessage(discoveryTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -599,7 +599,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic);
+    mqttClient.beginMessage(discoveryTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -625,7 +625,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic);
+    mqttClient.beginMessage(discoveryTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -651,7 +651,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic);
+    mqttClient.beginMessage(discoveryTopic, true, 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -753,18 +753,34 @@ void loop() {
 
       float amount = 0.0;
       homeassistant.states.error_code = grocy_client.barcode_load_data(Barcode);
-      if (homeassistant.states.error_code == 200) {
-
-        if (mode == 1 && !MQTT_enable || MQTT_enable && homeassistant.mode == "scan and consume") {
-          //function for consuming Barcodes
-          grocy_client.barcode_consume(Barcode, grocy_client.Barcode.amount);
-        };
-        if (mode == 2 && !MQTT_enable || MQTT_enable && homeassistant.mode == "scan and add") {
-          //function for adding Products to Stock
-          grocy_client.barcode_add(Barcode, grocy_client.Barcode.amount);
-        };
-      };
-
+      Serial.println(homeassistant.states.error_code);
+      // After retrieving data from Grocy API, check stock amount
+      if (grocy_client.Product.stock_amount.toInt() <= 0) {
+          // Set error message indicating product is out of stock
+          grocy_client.error_message = "Product is out of stock";
+      }
+      
+ //Check if there was an error while retrieving data or product is out of stock
+if ((homeassistant.states.error_code != 200) || (grocy_client.Product.stock_amount.toInt() <= 0 && homeassistant.mode == "scan and consume")) {
+    // Send error message to MQTT client
+    homeassistant.states.barcode = Barcode;
+    homeassistant.states.product_name = "";
+    homeassistant.states.product_id = "";
+    homeassistant.states.product_stock_amount = "";
+    homeassistant.states.barcode_amount = 0;
+    homeassistant.states.error_code = homeassistant.states.error_code != 200 ? homeassistant.states.error_code : 404;
+    homeassistant.states.error_message = grocy_client.error_message;
+    ref_state = 1;
+    } else {
+    // Proceed with normal operation
+    if ((mode == 1 && !MQTT_enable) || homeassistant.mode == "scan and consume") {
+        // Function for consuming Barcodes
+        grocy_client.barcode_consume(Barcode, grocy_client.Barcode.amount);
+    } else if ((mode == 2 && !MQTT_enable) || homeassistant.mode == "scan and add") {
+        // Function for adding Products to Stock
+        grocy_client.barcode_add(Barcode, grocy_client.Barcode.amount);
+    }}
+      
       //homeassistant.states.mode;
       homeassistant.states.barcode = Barcode;
       homeassistant.states.product_name = grocy_client.Product.name;
@@ -793,7 +809,7 @@ void loop() {
   int messageSize = mqttClient.parseMessage();
   if (messageSize) {
     // we received a message, print out the topic and contents
-    Serial.println("message recived");
+    Serial.println("message received");
     String masseage_topic = mqttClient.messageTopic();
     message = "";
     while (mqttClient.available()) {
@@ -804,7 +820,7 @@ void loop() {
     //Mode received
     String ioTopic = mqttName + "/mode";
     if (masseage_topic == ioTopic) {
-      Serial.println("mode recived");
+      Serial.println("mode received");
       if (homeassistant.mode != message) {
         Serial.println(homeassistant.mode);
         Serial.println("changed to");
