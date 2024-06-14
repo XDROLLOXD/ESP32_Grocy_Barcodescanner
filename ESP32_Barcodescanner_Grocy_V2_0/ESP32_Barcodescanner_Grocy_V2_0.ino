@@ -37,9 +37,7 @@ const int mqttPort = 1883;                 //MQTT Port
 const char* mqttUser = "MQTT-User";        //MQTT User
 const char* mqttPassword = "MQTT-Password";  //MQTT Password
 
-
-
-unsigned long check_connection;
+nsigned long check_connection;
 String paltform = "homeassistant";
 
 //Scanned Barcode
@@ -184,7 +182,7 @@ public:
 
       Serial.print("Product ");
       Serial.print(Product.name);
-      Serial.println(" data loadet");
+      Serial.println(" data loaded");
       error_message = "";
       //Serial.println(payload);
       delay(100);
@@ -256,7 +254,7 @@ public:
       error_message = "";
     } else {
       beep_error();
-      Serial.print("Errorx code: ");
+      Serial.print("Error code: ");
       Serial.println(httpResponseCode);
       String payload = http.getString();
       Serial.println(payload);
@@ -293,7 +291,7 @@ public:
       beep_succes();
       Serial.print("Product ");
       Serial.print(Product.name);
-      Serial.println(" counsumed");
+      Serial.println(" consumed");
       error_message = "";
 
 
@@ -303,11 +301,16 @@ public:
       String payload = http.getString();
       Serial.println(payload);
       beep_error();
-
+      
       DynamicJsonDocument err(6144);
       deserializeJson(err, payload);
       String error = err["error_message"];
       error_message = error;
+
+      if(error == "Amount to be consumed cannot be > current stock amount (if supplied, at the desired location)"){
+        Serial.print("Product is out of stock");
+      };
+
     }
     http.end();
     return httpResponseCode;
@@ -435,7 +438,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
 
-    mqttClient.beginMessage(discoveryTopic, true, 1);
+    mqttClient.beginMessage(discoveryTopic, true , 1);
     mqttClient.print(buffer);
     mqttClient.endMessage();
   };
@@ -468,7 +471,7 @@ private:
 
     size_t n = serializeJson(doc, buffer);
     if (MQTT_enable == true) {
-      mqttClient.beginMessage(discoveryTopic), true, 1;
+      mqttClient.beginMessage(discoveryTopic, true, 1);
       mqttClient.print(buffer);
       mqttClient.endMessage();
     };
@@ -733,6 +736,43 @@ void setup() {
   };
 }
 
+void reconnectWiFi() {
+  Serial.println("Reconnecting to WiFi...");
+  WiFi.disconnect();
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Reconnected to WiFi network with IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnectMQTT() {
+  Serial.println("Reconnecting to MQTT...");
+  while (!mqttClient.connected()) {
+    Serial.print(".");
+    if (mqttClient.connect(mqttServer, mqttPort)) {
+      Serial.println("Connected to MQTT");
+      delay(1000);
+
+      homeassistant.send_discovery();
+
+      // Subscribing IO Topics
+      String MAC = WiFi.macAddress();
+      MAC.replace(":", "");
+      String mqttName = "Easy_Scanner_" + MAC;
+      String ioTopic = mqttName + "/mode";
+      mqttClient.subscribe(ioTopic);
+    } else {
+      Serial.print("Failed with state ");
+      Serial.println(mqttClient.connectError());
+      delay(1000);
+    }
+  }
+}
+
 void loop() {
 
   Barcode = gm60.detection();
@@ -780,7 +820,7 @@ if ((homeassistant.states.error_code != 200) || (grocy_client.Product.stock_amou
         // Function for adding Products to Stock
         grocy_client.barcode_add(Barcode, grocy_client.Barcode.amount);
     }}
-      
+
       //homeassistant.states.mode;
       homeassistant.states.barcode = Barcode;
       homeassistant.states.product_name = grocy_client.Product.name;
@@ -795,6 +835,7 @@ if ((homeassistant.states.error_code != 200) || (grocy_client.Product.stock_amou
 
     } else {
       Serial.println("WiFi Disconnected");
+      reconnectWiFi();
     }
     lastTime = millis();
   }
@@ -852,4 +893,11 @@ if ((homeassistant.states.error_code != 200) || (grocy_client.Product.stock_amou
     mqtt_ref_time = millis();
     ref_state = 0;
   }
+
+  if (!mqttClient.connected() && MQTT_enable) {
+    reconnectMQTT();
+  }
+
+  mqttClient.poll();
 }
+
